@@ -15,6 +15,19 @@ import rockHitSound from "../assets/sounds/rockhit.mp3";
 import lostSound from "../assets/sounds/lost.mp3";
 const GAME_WIDTH = 1280;
 const GAME_HEIGHT = 800;
+
+// Área física desde la que ALBA envía las coordenadas del cursor.
+// En algunos dispositivos el mensaje "setup" informa el tamaño completo
+// del iframe (1280 x 800 o 1920 x 1080), aunque cursor.x/cursor.y continúan
+// usando esta área. Si usamos el tamaño del iframe para normalizar el cursor,
+// el mono solo alcanza aproximadamente la mitad superior del juego.
+const DEFAULT_ALBA_AREA = {
+  x: 43,
+  y: 47,
+  width: 460,
+  height: 320,
+};
+
 const MONKEY_X = 185;
 const MONKEY_WIDTH = 150;
 const MONKEY_HEIGHT = 150;
@@ -45,6 +58,44 @@ const BANANA_TYPES = [
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
+
+function getEffectiveAlbaArea(area) {
+  const width = Number(area?.width);
+  const height = Number(area?.height);
+  const x = Number(area?.x);
+  const y = Number(area?.y);
+
+  const hasValidSize = width > 0 && height > 0;
+
+  if (!hasValidSize) {
+    return {
+      x: DEFAULT_ALBA_AREA.x,
+      y: DEFAULT_ALBA_AREA.y,
+      w: DEFAULT_ALBA_AREA.width,
+      h: DEFAULT_ALBA_AREA.height,
+    };
+  }
+
+  const looksLikeViewportSize =
+    width >= GAME_WIDTH * 0.75 || height >= GAME_HEIGHT * 0.75;
+
+  if (looksLikeViewportSize) {
+    return {
+      x: DEFAULT_ALBA_AREA.x,
+      y: DEFAULT_ALBA_AREA.y,
+      w: DEFAULT_ALBA_AREA.width,
+      h: DEFAULT_ALBA_AREA.height,
+    };
+  }
+
+  return {
+    x: Number.isFinite(x) ? x : DEFAULT_ALBA_AREA.x,
+    y: Number.isFinite(y) ? y : DEFAULT_ALBA_AREA.y,
+    w: width,
+    h: height,
+  };
+}
+
 function randomItem(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
@@ -220,7 +271,12 @@ export default function LevelTwoGame({
   const gameAreaRef = useRef(null);
   const gameSizeRef = useRef({ width: GAME_WIDTH, height: GAME_HEIGHT });
 
-  const areaRef = useRef({ x: 0, y: 0, w: GAME_WIDTH, h: GAME_HEIGHT });
+  const areaRef = useRef({
+    x: DEFAULT_ALBA_AREA.x,
+    y: DEFAULT_ALBA_AREA.y,
+    w: DEFAULT_ALBA_AREA.width,
+    h: DEFAULT_ALBA_AREA.height,
+  });
   const lastHostRef = useRef({ x: 0, y: GAME_HEIGHT / 2 });
   const lastSensorPressTsRef = useRef(0);
   const collectedRef = useRef(0);
@@ -533,12 +589,12 @@ export default function LevelTwoGame({
       const data = event?.data;
       if (!data || typeof data !== "object") return;
       if (data.type === "setup") {
-        areaRef.current = {
-          x: data.offsetX ?? (data.offset && data.offset.left) ?? 0,
-          y: data.offsetY ?? (data.offset && data.offset.top) ?? 0,
-          w: data.width ?? GAME_WIDTH,
-          h: data.height ?? GAME_HEIGHT,
-        };
+        areaRef.current = getEffectiveAlbaArea({
+          x: data.offsetX ?? (data.offset && data.offset.left),
+          y: data.offsetY ?? (data.offset && data.offset.top),
+          width: data.width,
+          height: data.height,
+        });
         return;
       }
       if (

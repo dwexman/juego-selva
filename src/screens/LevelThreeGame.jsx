@@ -41,11 +41,50 @@ const SPEED_VALUES = {
 const GAME_WIDTH = 1280;
 const GAME_HEIGHT = 800;
 
+// Área física desde la que ALBA envía las coordenadas del cursor.
+// En algunos dispositivos el mensaje "setup" informa el tamaño completo
+// del iframe (1280 x 800 o 1920 x 1080), aunque cursor.x/cursor.y continúan
+// usando esta área. Si usamos el tamaño del iframe para normalizar el cursor,
+// el mono solo alcanza aproximadamente la mitad superior del juego.
+const DEFAULT_ALBA_AREA = {
+  x: 43,
+  y: 47,
+  width: 460,
+  height: 320,
+};
+
 const BANANA_VALUE = 1;
 const BANANA_SPAWN_CHANCE = 0.34;
 
 const clamp = (value, minimum, maximum) => {
   return Math.min(maximum, Math.max(minimum, value));
+};
+
+const getEffectiveAlbaArea = (area) => {
+  const width = Number(area?.width);
+  const height = Number(area?.height);
+  const x = Number(area?.x);
+  const y = Number(area?.y);
+
+  const hasValidSize = width > 0 && height > 0;
+
+  if (!hasValidSize) {
+    return { ...DEFAULT_ALBA_AREA };
+  }
+
+  const looksLikeViewportSize =
+    width >= GAME_WIDTH * 0.75 || height >= GAME_HEIGHT * 0.75;
+
+  if (looksLikeViewportSize) {
+    return { ...DEFAULT_ALBA_AREA };
+  }
+
+  return {
+    x: Number.isFinite(x) ? x : DEFAULT_ALBA_AREA.x,
+    y: Number.isFinite(y) ? y : DEFAULT_ALBA_AREA.y,
+    width,
+    height,
+  };
 };
 
 const randomBetween = (minimum, maximum) => {
@@ -110,10 +149,7 @@ export default function LevelThreeGame({
   });
 
   const sensorAreaRef = useRef({
-    x: 0,
-    y: 0,
-    width: GAME_WIDTH,
-    height: GAME_HEIGHT,
+    ...DEFAULT_ALBA_AREA,
   });
 
   const gameSizeRef = useRef({
@@ -1003,12 +1039,12 @@ export default function LevelThreeGame({
       }
 
       if (data.type === "setup") {
-        sensorAreaRef.current = {
-          x: data.offsetX ?? data.offset?.left ?? 0,
-          y: data.offsetY ?? data.offset?.top ?? 0,
-          width: data.width ?? GAME_WIDTH,
-          height: data.height ?? GAME_HEIGHT,
-        };
+        sensorAreaRef.current = getEffectiveAlbaArea({
+          x: data.offsetX ?? data.offset?.left,
+          y: data.offsetY ?? data.offset?.top,
+          width: data.width,
+          height: data.height,
+        });
 
         return;
       }
