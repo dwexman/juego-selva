@@ -142,6 +142,12 @@ export default function LevelThreeGame({
   const initializedRef = useRef(false);
   const finishedRef = useRef(false);
   const pausedRef = useRef(false);
+  const startedRef = useRef(false);
+  const preparationSecondsRef = useRef(0);
+  const startProtectionRef = useRef(0);
+  const [started, setStarted] = useState(false);
+  const [countdown, setCountdown] = useState(3);
+  const [centered, setCentered] = useState(false);
 
   const dimensionsRef = useRef({
     width: GAME_WIDTH,
@@ -253,21 +259,18 @@ export default function LevelThreeGame({
       const monkeyDimensions = getMonkeyDimensions();
       const path = tunnelPathRef.current;
 
-      /*
-       * Un poco más difícil que antes:
-       * menos espacio libre, pero sin llegar a ser injusto.
-       */
+      // Pasillos más amplios, con transiciones suaves.
       const monkeySafetyMargin = clamp(height * 0.075, 62, 82);
       const minimumPlayableGap =
         monkeyDimensions.height + monkeySafetyMargin;
 
       const minimumGap = clamp(
-        Math.max(height * 0.228, minimumPlayableGap),
-        205,
-        255
+        Math.max(height * 0.30, minimumPlayableGap),
+        240,
+        290
       );
 
-      const maximumGap = clamp(height * 0.395, 300, 370);
+      const maximumGap = clamp(height * 0.46, 350, 410);
 
       if (safeColumn) {
         const safeGap = Math.max(height * 0.5, minimumGap + 78);
@@ -293,7 +296,7 @@ export default function LevelThreeGame({
             getRandomItem(centerOptions) +
             randomBetween(-height * 0.035, height * 0.035);
 
-          const createNarrowSection = Math.random() < 0.55;
+          const createNarrowSection = Math.random() < 0.35;
 
           if (createNarrowSection) {
             const narrowMaximum = Math.min(
@@ -334,7 +337,7 @@ export default function LevelThreeGame({
       const gapHeight = clamp(
         path.currentGap,
         minimumGap,
-        maximumGap
+        safeColumn ? Math.max(maximumGap, height * 0.56) : maximumGap
       );
 
       const minimumWallDepth = clamp(
@@ -372,31 +375,39 @@ export default function LevelThreeGame({
   const createColumn = useCallback(
     (x, safeColumn = false) => {
       const { height } = dimensionsRef.current;
-      const tunnelShape = getNextTunnelShape(safeColumn);
+      const baseShape = getNextTunnelShape(safeColumn);
+      // Cada animal retrocede hacia su borde: alternan largos y cortos.
+      const topRetreat = safeColumn ? 28 : getRandomItem([18, 38, 60]);
+      const bottomRetreat = safeColumn ? 28 : getRandomItem([18, 38, 60]);
+      const tunnelShape = {
+        gapTop: Math.max(35, baseShape.gapTop - topRetreat),
+        gapBottom: Math.min(height - 35, baseShape.gapBottom + bottomRetreat),
+      };
+      tunnelShape.gapHeight = tunnelShape.gapBottom - tunnelShape.gapTop;
       const bottomDepth = height - tunnelShape.gapBottom;
 
-      const snakeTop = randomBetween(-180, -110);
-      const snakeIntrusion = randomBetween(10, 20);
+      const snakeTop = randomBetween(-100, -65);
+      const snakeIntrusion = randomBetween(4, 10);
 
       const snakeHeight =
         tunnelShape.gapTop - snakeTop + snakeIntrusion;
 
       const snakeWidth = clamp(
-        snakeHeight * randomBetween(0.46, 0.57),
-        210,
-        350
+        snakeHeight * randomBetween(0.43, 0.52),
+        145,
+        255
       );
 
       const bottomHeight = clamp(
-        bottomDepth + randomBetween(65, 110),
-        215,
-        height * 0.62
+        bottomDepth + randomBetween(25, 55),
+        150,
+        height * 0.52
       );
 
       const bottomWidth = clamp(
-        bottomHeight * randomBetween(0.98, 1.18),
-        225,
-        345
+        bottomHeight * randomBetween(0.88, 1.06),
+        165,
+        275
       );
 
       /*
@@ -416,8 +427,8 @@ export default function LevelThreeGame({
       const canCreateRock =
         !safeColumn &&
         rockCooldownRef.current <= 0 &&
-        tunnelShape.gapHeight >= wideTunnelThreshold &&
-        Math.random() < 0.58;
+        baseShape.gapHeight >= wideTunnelThreshold &&
+        Math.random() < 0.38;
 
       let obstacle = null;
 
@@ -554,7 +565,8 @@ export default function LevelThreeGame({
     const finalX = width + spacing * 7;
 
     while (currentX <= finalX) {
-      const safeColumn = currentX < width * 0.43;
+      const safeColumn = currentX <
+        width * 0.17 + monkeyDimensions.width + SPEED_VALUES[normalizedSpeed] * 2.5;
       createdColumns.push(createColumn(currentX, safeColumn));
       currentX += spacing;
     }
@@ -566,7 +578,7 @@ export default function LevelThreeGame({
       backgroundX: 0,
       columns: [...createdColumns],
     });
-  }, [createColumn, getColumnSpacing, getMonkeyDimensions]);
+  }, [createColumn, getColumnSpacing, getMonkeyDimensions, normalizedSpeed]);
 
   const finishGame = useCallback(
     (reason) => {
@@ -616,7 +628,8 @@ export default function LevelThreeGame({
     (collisionId, collisionType = "animal") => {
       const now = performance.now();
 
-      if (now < invulnerableUntilRef.current) {
+      if (!startedRef.current || startProtectionRef.current > 0 ||
+          now < invulnerableUntilRef.current) {
         return false;
       }
 
@@ -862,6 +875,28 @@ export default function LevelThreeGame({
           maximumMonkeyY
         );
 
+        if (!startedRef.current) {
+          const centerY = (height - monkeyDimensions.height) / 2;
+          const isCentered =
+            Math.abs(monkeyYRef.current - centerY) <= 55 &&
+            Math.abs(targetMonkeyYRef.current - centerY) <= 55;
+          setCentered(isCentered);
+          preparationSecondsRef.current = isCentered
+            ? preparationSecondsRef.current + deltaTime
+            : 0;
+          setCountdown(Math.max(1, 3 - Math.floor(preparationSecondsRef.current)));
+          setGameFrame((frame) => ({ ...frame, monkeyY: monkeyYRef.current }));
+
+          if (preparationSecondsRef.current >= 3) {
+            startedRef.current = true;
+            startProtectionRef.current = 2;
+            setStarted(true);
+          }
+          animationFrameRef.current = requestAnimationFrame(updateGame);
+          return;
+        }
+
+        startProtectionRef.current = Math.max(0, startProtectionRef.current - deltaTime);
         const movementSpeed = SPEED_VALUES[normalizedSpeed];
         const movement = movementSpeed * deltaTime;
         const spacing = getColumnSpacing();
@@ -1207,7 +1242,7 @@ export default function LevelThreeGame({
   }, [updateGame]);
 
   useEffect(() => {
-    if (paused || finishedRef.current) {
+    if (!started || paused || finishedRef.current) {
       return undefined;
     }
 
@@ -1222,7 +1257,7 @@ export default function LevelThreeGame({
     return () => {
       window.clearInterval(timer);
     };
-  }, [paused]);
+  }, [paused, started]);
 
   useEffect(() => {
     if (timeLeft <= 0) {
@@ -1481,7 +1516,9 @@ export default function LevelThreeGame({
           (column.x + column.topAnimal.offsetX) * scaleX -
           (column.topAnimal.width * objectScale) / 2;
 
-        const topImageTop = column.topAnimal.top;
+        const topImageTop =
+          (column.gapTop + column.topAnimal.intrusion) * scaleY -
+          column.topAnimal.height * objectScale;
 
         const bottomImageLeft =
           (column.x + column.bottomAnimal.offsetX) * scaleX -
@@ -1507,7 +1544,7 @@ export default function LevelThreeGame({
               sx={{
                 position: "absolute",
                 left: `${topImageLeft}px`,
-                top: `${topImageTop * scaleY}px`,
+                top: `${topImageTop}px`,
                 width: `${column.topAnimal.width * objectScale}px`,
                 height: `${column.topAnimal.height * objectScale}px`,
                 objectFit: "fill",
@@ -1624,6 +1661,38 @@ export default function LevelThreeGame({
           },
         }}
       />
+
+      {!started && (
+        <Box sx={{ position: "absolute", inset: 0, zIndex: 105, pointerEvents: "none" }}>
+          <Box sx={{
+            position: "absolute", left: "15%", top: "50%",
+            transform: "translateY(-50%)", width: `${monkeyDimensions.width * objectScale + 32 * objectScale}px`,
+            height: `${(monkeyDimensions.height + 110) * scaleY}px`,
+            border: `${px(4)} dashed ${centered ? "#BBF7A5" : "#FFE18A"}`,
+            borderRadius: px(30), backgroundColor: "rgba(255,255,255,0.10)",
+          }} />
+          <Box sx={{
+            position: "absolute", left: "40%", right: "8%", top: "50%",
+            transform: "translateY(-50%)", padding: px(26),
+            borderRadius: px(28), backgroundColor: "rgba(17, 7, 52, 0.93)",
+            border: `${px(3)} solid white`, color: "white", textAlign: "center",
+            boxShadow: `0 ${px(10)} ${px(30)} rgba(0,0,0,0.3)`,
+          }}>
+            <Typography sx={{ fontSize: px(32), fontWeight: 800, lineHeight: 1.2 }}>
+              Posiciónate al centro de la pantalla
+            </Typography>
+            <Typography sx={{ fontSize: px(21), marginTop: px(14) }}>
+              {centered ? "¡Muy bien! Mantén el mono dentro de la zona marcada." : "Mueve el mono hacia la zona marcada para comenzar."}
+            </Typography>
+            <Typography role="status" aria-live="polite" sx={{
+              fontSize: px(88), fontWeight: 900, lineHeight: 1.1,
+              marginTop: px(12), color: centered ? "#BBF7A5" : "#FFE18A",
+            }}>
+              {countdown}
+            </Typography>
+          </Box>
+        </Box>
+      )}
 
       {pauseModalOpen && (
         <Box
